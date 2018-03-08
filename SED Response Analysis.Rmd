@@ -1,0 +1,136 @@
+---
+title: "SED Response Analysis"
+author: "hollen"
+date: "March 7, 2018"
+output: pdf_document
+params:
+  xmitFile: "XmitCommands.csv"
+  recvFile: "RecvCommands.csv"
+  maxDeltaT: 50.0
+---
+
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+xmitData <- read.csv(params$xmitFile)
+recvData <- read.csv(params$recvFile)
+```
+
+```{r munging, include=FALSE, cache=TRUE}
+library(dplyr)
+
+xmitTidy <- xmitData %>%
+  select("No.", "Time")
+recvTidy <- recvData %>%
+  select("No.", "Time")
+
+responseTimes <- data.frame(deltaTime = (recvTidy$Time*1000) - (xmitTidy$Time*1000))
+```
+
+## SED Response Analysis
+
+Analysis of the response time of the SED instance of the SPC simulation should prove to respond within 50 milliseconds on each acquisition cycle.   We expect that this response time should be met at least 95 percent of the time.
+
+First let's have a look at the summary data observed:
+
+```{r summary, cache=FALSE}
+summary(responseTimes)
+```
+
+The max value of the response time - `r max(responseTimes$deltaTime)` ms - is above the expected value of  `r params$maxDeltaT` that we were expecting, so let's see how many observations are above `r params$maxDeltaT`:
+
+```{r eda_outlier_search, cache=FALSE, echo=FALSE, message=FALSE}
+library(dplyr)
+outliers <- responseTimes %>%
+  filter(deltaTime > params$maxDeltaT)
+```
+
+```{r outliers_display}
+outliers
+```
+
+We found `r length(outliers$deltaTime)` outlier(s) among the data.  Was this a one-shot anomaly or was something going on at the time of the outlier?
+
+```{r outlier_sampling, include=FALSE, cache=FALSE}
+library(ggplot2)
+outlierSample <- data.frame(deltaTime=responseTimes$deltaTime[73579:73979],pt=c(1:401))
+```
+
+```{r outlier_timeline, cache=FALSE, echo=FALSE}
+outlierSample %>%
+  ggplot(aes(x=pt, y=deltaTime)) + 
+  geom_line(color = 'cyan') + 
+  labs(x = 'LogPoint [-]',
+       y = 'Response Time [milliseconds]',
+       title = 'Response Times at Time of Anomaly',
+       subtitle = 'Time graph of the data around the anomaly',
+       caption = '(20 seconds before and after the event)') +
+  theme_dark()
+
+```
+
+From the timeline there doesn't appear to be anything suspicious around the time of the singular anomaly in the observations.  Let's discard this singular anomaly and continue to analyze the remainder of the observations.
+
+```{r filter_anomalies, cache=FALSE, include=FALSE}
+responseTimes <- responseTimes %>%
+  filter(deltaTime < 80)
+```
+
+Now let's have a look at the summary information for the cleaned up response times:
+
+```{r cleaned_summary, cache=FALSE}
+summary(responseTimes)
+```
+
+What sort of values could we find in the upper quartile?
+
+```{r explore_upper_quartile, cache=FALSE, message=FALSE, warning=FALSE, echo=FALSE}
+q75 <- fivenum(responseTimes$deltaTime)[[4]]
+msg <- stringr::str_join('Observations Greater than ', as.character(round(q75,2)), ' milliseconds')
+max <- max(responseTimes$deltaTime)
+
+responseTimes %>%
+  filter(deltaTime >= q75) %>%
+  ggplot(aes(x = deltaTime)) + 
+  geom_histogram(color = 'darkgreen', fill = 'green', binwidth = 1) + 
+  labs(x = 'Response Time [milliseconds]',
+       y = 'Frequency [-]',
+       title = 'Upper Quartile of Response Time Observations',
+       subtitle = msg) +
+  theme_dark()
+```
+
+Now we can see that most of the observations were less than 15 milliseconds.
+
+```{r histogram_below_15ms, cache=FALSE, warning=FALSE, message=FALSE, echo=FALSE}
+responseTimes %>%
+  filter(deltaTime <= 15) %>%
+  ggplot(aes(x = deltaTime)) + 
+# geom_histogram(color = 'darkgreen', fill = 'green', binwidth = 0.1) + 
+# geom_density(color = 'green') + 
+# geom_freqpoly(color = 'green') + 
+  geom_area(stat="bin", color = 'darkgreen', fill = 'lightgreen', alpha = 0.25) + 
+  labs(x = 'Response Time [milliseconds]',
+       y = 'Frequency [-]',
+       title = 'Response Time Observations',
+       subtitle = 'Observations less than 15 ms displayed') +
+  theme_dark()
+  
+```
+
+Let's wrap it up with a QQ plot:
+
+```{r qq_plot, cache=FALSE, echo=FALSE}
+responseTimes %>%
+  filter(deltaTime <= 15) %>%
+  ggplot(aes(sample = deltaTime)) + 
+  geom_qq(color = 'green') + 
+  labs(x = '',
+       y = '',
+       title = 'Response Time QQ Plot',
+       subtitle = '') +
+  theme_dark()
+  
+
+```
+
